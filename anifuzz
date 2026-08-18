@@ -1,0 +1,292 @@
+#!/bin/bash
+
+nth() {
+    local -a lines
+    local line
+    mapfile -t lines
+    [ "${#lines[@]}" -eq 0 ] && return 1
+    if [ "${#lines[@]}" -eq 1 ]; then
+        line="${lines[0]}"
+        if [[ "$line" == *$'\t'* ]]; then
+            printf "%s\n" "${line#*	}"
+        else
+            printf "%s\n" "$line"
+        fi
+        return 0
+    fi
+    
+    local _formatted=""
+    for line in "${lines[@]}"; do
+        if [[ "$line" == *$'\t'* ]]; then
+            _formatted+="${line%%	*} ${line##*	}"$'\n'
+        else
+            _formatted+="${line}"$'\n'
+        fi
+    done
+    
+    local _sel=$(printf "%s" "$_formatted" | fuzzel -d -p "$1" $menu_extra_flags)
+    [ -n "$_sel" ] || return 1
+    
+    for line in "${lines[@]}"; do
+        if [[ "$line" == "${_sel%% *}" || "$line" == "${_sel%% *}	"* ]]; then
+            if [[ "$line" == *$'\t'* ]]; then
+                printf "%s\n" "${line#*	}"
+            else
+                printf "%s\n" "$line"
+            fi
+            return 0
+        fi
+    done
+    return 1
+}
+
+die() {
+    notify-send "ani-cli" "$*" -i dialog-error
+    exit 1
+}
+
+dep_ch() {
+    command -v "$1" >/dev/null || die "Program $1 not found. Please install it."
+}
+
+cleanup() {
+    rm -f "${histfile}.new" # remove temp logfile
+}
+
+anidb_curl() {
+    curl -sL -A "$agent" --max-time 10 "$@"
+}
+
+# search the query and give results. format is (id \t name)
+anidb_search() {
+    #shellcheck disable=SC2059
+    _page="$(anidb_curl "https://anidb.app/browse?q=$1" | tr '\n' ' ' | sed 's|<a href|\n<a href|g')"
+    if [[ "${_page,,}" == *"just a moment"* ]]; then
+        die "Blocked by cloudflare."
+    fi
+    printf "%s" "$_page" | sed -nE 's|.*anime/([a-z0-9-]+-[0-9]+)".*alt="([^"]+)".*|\1\t\2|p' | sed -e "s|&#039;|'|g" -e 's|&quot;|"|g'
+}
+
+# extract mal_id and seasons metadata
+anidb_desc() {
+    #shellcheck disable=SC2059
+    _page="$(anidb_curl "https://anidb.app/anime/$1" | tr '\n' ' ' | sed 's|<a href|\n<a href|g')"
+    mal_id="$(printf "%s" "$_page" | sed -nE 's|.*https://myanimelist.net/anime/([0-9]+)/.*|\1|p')"
+    seasons="$(printf "%s" "$_page" | sed -n '/>Seasons</,/>Details</p' | sed -nE 's|.*anime/([^"]+-[0-9]+)"[^>]*title="([^"]+)".*|\1\t\2|p' | sed -e "s|&#039;|'|g")"
+    [ -n "$seasons" ] && seasons_option="\nchange_season"
+}
+
+# get the episodes list of the selected anime. format is (id \t ep_no)
+anidb_episodes() {
+    #shellcheck disable=SC2059
+    _page="$(anidb_curl "https://anidb.app/api/frontend/anime/${1##*-}/episodes")"
+    printf "%s" "$_page" | sed 's|},{|}\n{|g' | sed -nE 's|.*"id":([0-9]+).*"number":([0-9]+).*|\1\t\2|p'
+}
+
+# extract the individual m3u8 links from response of embed urls
+anidb_m3u8() {
+    _ep_id=$(printf "%s" "$episode_maps" | sed -nE "s|^([0-9]+)\t${1}$|\1|p")
+    _lang="jpn"
+    [ "$2" = "dub" ] && _lang="eng"
+    #shellcheck disable=SC2059
+    _page="$(anidb_curl "https://anidb.app/api/frontend/episode/${_ep_id}/languages")"
+    _embed="$(printf "%s" "$_page" | sed 's|},{|}\n{|g' | sed -nE 's|.*'"${_lang}"'.*embed_url":"([^"]+)".*|\1|p' | sed 's|\\/|/|g' | head -n 1)"
+    [ -z "$_embed" ] && return 1
+    _embed_page="$(anidb_curl "$_embed")"
+    _m3u8_master="$(printf "%s" "$_embed_page" | sed -nE "s|.*file: '([^']*)'.*|\1|p" | head -n 1)"
+    anidb_curl "${_m3u8_master}" | sed 's|^#EXT-X-STREAM.*x||g; s|,.*|p|g; /^#/d; $!N; s|\n| >|;/EXT-X-I-FRAME/d'
+}
+
+# gets embed url, collects direct links and selects one with desired quality into $episode
+get_video_link() {
+    links=$(anidb_m3u8 "$ep_no" "$mode" | sort -g -r -s)
+    [ -z "$links" ] && die "No sources found for $mode!"
+
+    video_link=$(printf "%s" "${links%%$'\n'*}" | cut -d ">" -f 2)
+    # should never trigger but just in case
+    if [[ $'\n'"$ep_list"$'\n' == *$'\n'"$ep_no"$'\n'* ]]; then
+        [ -z "$video_link" ] && die "Episode is released, but no valid sources!"
+    else
+        [ -z "$video_link" ] && die "Episode not released!"
+    fi
+}
+
+process_hist_entry() {
+    ep_list=$(anidb_episodes "$anime_id" | cut -f 2)
+    ep_no=$(printf "%s" "$ep_list" | sed -n "/^${ep_no}$/{n;p;}") 2>/dev/null
+    [ -n "$ep_no" ] && printf "%s\t%s - episode %s\n" "$anime_id" "$anime_title" "$ep_no"
+}
+
+update_history() {
+    if grep -q "	${anime_id}	" "$histfile"; then
+        # escape sed special chars in replacement: & and \ and delimiter |
+        safe_title="${anime_title//&/\\&}"
+        safe_title="${safe_title//|/\\|}"
+        sed -E "s|^[^	]+	${anime_id}	[^	]+$|${ep_no}	${anime_id}	${safe_title}|" "$histfile" >"${histfile}.new"
+    else
+        cp "$histfile" "${histfile}.new"
+        printf "%s\t%s\t%s\n" "$ep_no" "$anime_id" "$anime_title" >>"${histfile}.new"
+    fi
+    mv "${histfile}.new" "$histfile"
+}
+
+play() {
+    # In case a range (e.g. 5-10) or multi-select was passed, just grab the first episode
+    ep_no="${ep_no%% *}"
+    ep_no="${ep_no%%-*}"
+    [ -z "$ep_no" ] && ep_no="$(printf '%s' "$ep_list" | head -n 1)"
+
+    canon_ep_no="$(printf "%s" "$ep_list" | sed -n "/^${ep_no}$/=")"
+    [ -z "$canon_ep_no" ] && die "Invalid episode!"
+    
+    [ "$log_episode" = 1 ] && command -v logger >/dev/null && logger -t ani-cli "${anime_title} ${ep_no}"
+    [ "$skip_intro" = 1 ] && skip_flag="$(ani-skip -i "$mal_id" -e "$canon_ep_no")"
+    [ -z "$video_link" ] && get_video_link
+    # shellcheck disable=SC2086
+    if [ "$no_detach" = 0 ]; then
+        nohup $player_function $skip_flag $player_extra_flags --force-media-title="${anime_title} Episode ${ep_no}" "$video_link" >/dev/null 2>&1 &
+    else
+        $player_function $skip_flag $player_extra_flags --force-media-title="${anime_title} Episode ${ep_no}" "$video_link"
+        mpv_exitcode=$?
+        [ "$exit_after_play" = 1 ] && exit "$mpv_exitcode"
+    fi
+    replay="$video_link"
+    unset video_link
+    update_history
+    wait
+}
+
+# MAIN
+agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+mode="${ANI_CLI_MODE:-sub}"
+log_episode="${ANI_CLI_LOG:-1}"
+player_function="${ANI_CLI_PLAYER:-mpv}"
+player_extra_flags="${ANI_CLI_PLAYER_FLAGS:-""}"
+no_detach="${ANI_CLI_NO_DETACH:-0}"
+exit_after_play="${ANI_CLI_EXIT_AFTER_PLAY:-0}"
+skip_intro="${ANI_CLI_SKIP_INTRO:-0}"
+menu_extra_flags="${ANI_CLI_MENU_FLAGS:-"-w 70 -l 15"}"
+hist_dir="${ANI_CLI_HIST_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/ani-cli}"
+[ ! -d "$hist_dir" ] && mkdir -p "$hist_dir"
+histfile="$hist_dir/ani-hsts"
+[ ! -f "$histfile" ] && : >"$histfile"
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -S | --select-nth)
+            [ $# -lt 2 ] && die "missing argument!"
+            index="$2"
+            shift
+            ;;
+        -c | --continue) source=history ;;
+        -D | --delete)
+            : >"$histfile"
+            exit 0
+            ;;
+        -e | --episode | -r | --range)
+            [ $# -lt 2 ] && die "missing argument!"
+            ep_no="$2"
+            shift
+            ;;
+        --dub) mode="dub" ;;
+        --no-detach) no_detach=1 ;;
+        --exit-after-play) exit_after_play=1 && no_detach=1 ;;
+        --skip) skip_intro=1 ;;
+
+        *) query="${query} $1"; query="${query# }"; query="${query// /+}" ;;
+    esac
+    shift
+done
+
+dep_ch "curl"
+dep_ch "sed"
+dep_ch "grep"
+[ "$skip_intro" = 1 ] && dep_ch "ani-skip"
+dep_ch "fuzzel"
+dep_ch "$player_function"
+
+trap 'cleanup; exit 1' INT HUP TERM
+
+# searching
+case "$source" in
+    history)
+        anime_list=$(while read -r ep_no anime_id anime_title; do process_hist_entry & done <"$histfile")
+        wait
+        [ -z "$anime_list" ] && die "No unwatched series in history!"
+        [ -z "${index##*[!0-9]*}" ] && anime_id=$(printf "%s" "$anime_list" | nl -w1 -s"	" | nth "Select anime: " | cut -f 1)
+        [ -z "${index##*[!0-9]*}" ] || anime_id=$(printf "%s" "$anime_list" | sed -n "${index}p" | cut -f 1)
+        [ -z "$anime_id" ] && exit 1
+        _hist_entry=$(printf "%s" "$anime_list" | grep "^$anime_id	")
+        anime_title="$(printf "%s" "$_hist_entry" | cut -f 2)"
+        ep_no="${anime_title##*- episode }"
+        anime_title="${anime_title% - episode*}"
+        anidb_desc "$anime_id" || true
+        episode_maps="$(anidb_episodes "$anime_id")"
+        ep_list="$(printf "%s" "$episode_maps" | cut -f 2)"
+        ;;
+    *)
+        [ -z "$query" ] && query=$(fuzzel -d --prompt-only="Search anime: " $menu_extra_flags 2>/dev/null)
+        [ -z "$query" ] && exit 1
+        query="${query// /+}"
+        anime_list=$(anidb_search "$query")
+        [ -z "$anime_list" ] && die "No results found!"
+        [ "$index" -eq "$index" ] 2>/dev/null && result=$(printf "%s" "$anime_list" | sed -n "${index}p")
+        [ -z "$index" ] && result=$(printf "%s" "$anime_list" | nl -w1 -s"	" | nth "Select anime: ")
+        [ -z "$result" ] && die "Invalid anime selection"
+        anime_title="$(printf "%s" "$result" | cut -f 2)"
+        anime_id="$(printf "%s" "$result" | cut -f 1)"
+        anidb_desc "$anime_id" || true
+        episode_maps="$(anidb_episodes "$anime_id")"
+        ep_list="$(printf '%s' "$episode_maps" | cut -f 2)"
+        [ -z "$ep_no" ] && ep_no=$(printf "%s" "$ep_list" | nth "Select episode: ")
+        [ -z "$ep_no" ] && die "Invalid episode selection"
+        ;;
+esac
+
+# playback & loop
+play
+
+#shellcheck disable=SC2059
+while cmd=$(printf "next\nreplay\nprevious\nselect$seasons_option\nquit" | nth "Playing episode $ep_no of $anime_title... "); do
+    case "$cmd" in
+        next) ep_no=$(printf "%s" "$ep_list" | sed -n "/^${ep_no}$/{n;p;}") 2>/dev/null ;;
+        replay) video_link="$replay" ;;
+        previous) ep_no=$(printf "%s" "$ep_list" | sed -n "/^${ep_no}$/{g;1!p;};h") 2>/dev/null ;;
+        select) ep_no=$(printf "%s" "$ep_list" | nth "Select episode: ") ;;
+        change_season)
+            new_anime="$(printf "%s" "$seasons" | nl -w1 -s"	" | nth "Select season: ")"
+            [ -z "$new_anime" ] && die "Invalid season selection"
+            anime_title="$(printf "%s" "$new_anime" | cut -f 2)"
+            anime_id="$(printf "%s" "$new_anime" | cut -f 1)"
+            anidb_desc "$anime_id" || true
+            episode_maps="$(anidb_episodes "$anime_id")"
+            ep_list="$(printf '%s' "$episode_maps" | cut -f 2)"
+            ep_no=$(printf "%s" "$ep_list" | nth "Select episode: ")
+            [ -z "$ep_no" ] && die "Invalid episode selection"
+            ;;
+        *)
+            cleanup
+            exit 0
+            ;;
+    esac
+    [ -z "$ep_no" ] && die "Out of range"
+    play
+done
+
+# anifuzz (Forked from ani-cli)
+# Copyright (c) 2026 elseawhy
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <http://www.gnu.org/licenses/>.
+#
+# Original project repository: https://github.com/pystardust/ani-cli

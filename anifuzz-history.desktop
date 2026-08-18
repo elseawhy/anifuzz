@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Anifuzz (History)
+Comment=Continue watching anime
+Exec=anifuzz --continue
+Icon=video-television
+Terminal=false
+Type=Application
+Categories=AudioVideo;
