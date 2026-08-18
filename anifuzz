@@ -190,11 +190,11 @@ case "$source" in
         anime_list=$(while read -r ep_no anime_id anime_title; do process_hist_entry & done <"$histfile")
         wait
         [ -z "$anime_list" ] && die "No unwatched series in history!"
-        [ -z "${index##*[!0-9]*}" ] && anime_id=$(printf "%s" "$anime_list" | nl -w1 -s"	" | nth "Select anime: " | cut -f 1)
-        [ -z "${index##*[!0-9]*}" ] || anime_id=$(printf "%s" "$anime_list" | sed -n "${index}p" | cut -f 1)
+        anime_id=$(printf "%s" "$anime_list" | nl -w1 -s"	" | nth "Select anime: ")
+        anime_id="${anime_id%%	*}"
         [ -z "$anime_id" ] && exit 1
-        _hist_entry=$(printf "%s" "$anime_list" | grep "^$anime_id	")
-        anime_title="$(printf "%s" "$_hist_entry" | cut -f 2)"
+        anime_title=$(printf "%s" "$anime_list" | grep "^$anime_id	")
+        anime_title="${anime_title#*	}"
         ep_no="${anime_title##*- episode }"
         anime_title="${anime_title% - episode*}"
         anidb_desc "$anime_id" || true
@@ -207,15 +207,14 @@ case "$source" in
         query="${query// /+}"
         anime_list=$(anidb_search "$query")
         [ -z "$anime_list" ] && die "No results found!"
-        [ "$index" -eq "$index" ] 2>/dev/null && result=$(printf "%s" "$anime_list" | sed -n "${index}p")
-        [ -z "$index" ] && result=$(printf "%s" "$anime_list" | nl -w1 -s"	" | nth "Select anime: ")
+        result=$(printf "%s" "$anime_list" | nl -w1 -s"	" | nth "Select anime: ")
         [ -z "$result" ] && die "Invalid anime selection"
-        anime_title="$(printf "%s" "$result" | cut -f 2)"
-        anime_id="$(printf "%s" "$result" | cut -f 1)"
+        anime_title="${result#*	}"
+        anime_id="${result%%	*}"
         anidb_desc "$anime_id" || true
         episode_maps="$(anidb_episodes "$anime_id")"
         ep_list="$(printf '%s' "$episode_maps" | cut -f 2)"
-        [ -z "$ep_no" ] && ep_no=$(printf "%s" "$ep_list" | nth "Select episode: ")
+        ep_no=$(printf "%s" "$ep_list" | nth "Select episode: ")
         [ -z "$ep_no" ] && die "Invalid episode selection"
         ;;
 esac
@@ -233,8 +232,8 @@ while cmd=$(printf "next\nreplay\nprevious\nselect$seasons_option\nquit" | nth "
         change_season)
             new_anime="$(printf "%s" "$seasons" | nl -w1 -s"	" | nth "Select season: ")"
             [ -z "$new_anime" ] && die "Invalid season selection"
-            anime_title="$(printf "%s" "$new_anime" | cut -f 2)"
-            anime_id="$(printf "%s" "$new_anime" | cut -f 1)"
+            anime_title="${new_anime#*	}"
+            anime_id="${new_anime%%	*}"
             anidb_desc "$anime_id" || true
             episode_maps="$(anidb_episodes "$anime_id")"
             ep_list="$(printf '%s' "$episode_maps" | cut -f 2)"
