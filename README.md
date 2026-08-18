@@ -6,10 +6,6 @@ A heavily stripped-down, GUI-first fork of [ani-cli](https://github.com/pystardu
 
 All terminal-specific baggage, redundant menus, and useless disk I/O have been ripped out to make it as fast and lightweight as possible.
 
-## Features
-- **Pure GUI Workflow**: Completely ditches the terminal. Uses `fuzzel` for all menus and interactions.
-- **Zero Bloat**: All debug modes, logging flags, and unused terminal features have been surgically extracted.
-
 ## Requirements
 - `mpv` (Video playback)
 - `fuzzel` (Application launcher/menu)
