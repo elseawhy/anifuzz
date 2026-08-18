@@ -1,6 +1,6 @@
 # anifuzz
 
-![Showcase](./demo.mp4)
+[demo.mp4](./demo.mp4)
 
 A heavily stripped-down, GUI-first fork of [ani-cli](https://github.com/pystardust/ani-cli), optimized specifically for `fuzzel` and tiling window managers (Sway, Hyprland, etc.).
 
