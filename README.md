@@ -1,6 +1,6 @@
 # anifuzz
 
-[Showcase](https://github.com/elseawhy/anifuzz/raw/master/demo.mp4)
+<video src="demo.mp4" controls="controls" width="100%"></video>
 
 A heavily stripped-down, GUI-first fork of [ani-cli](https://github.com/pystardust/ani-cli), optimized specifically for `fuzzel` and tiling window managers (Sway, Hyprland, etc.).
 
