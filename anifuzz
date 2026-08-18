@@ -166,37 +166,14 @@ no_detach="${ANI_CLI_NO_DETACH:-0}"
 exit_after_play="${ANI_CLI_EXIT_AFTER_PLAY:-0}"
 skip_intro="${ANI_CLI_SKIP_INTRO:-0}"
 menu_extra_flags="${ANI_CLI_MENU_FLAGS:-"-w 70 -l 15"}"
+
 hist_dir="${ANI_CLI_HIST_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/ani-cli}"
 [ ! -d "$hist_dir" ] && mkdir -p "$hist_dir"
+
 histfile="$hist_dir/ani-hsts"
 [ ! -f "$histfile" ] && : >"$histfile"
 
-while [ $# -gt 0 ]; do
-    case "$1" in
-        -S | --select-nth)
-            [ $# -lt 2 ] && die "missing argument!"
-            index="$2"
-            shift
-            ;;
-        -c | --continue) source=history ;;
-        -D | --delete)
-            : >"$histfile"
-            exit 0
-            ;;
-        -e | --episode | -r | --range)
-            [ $# -lt 2 ] && die "missing argument!"
-            ep_no="$2"
-            shift
-            ;;
-        --dub) mode="dub" ;;
-        --no-detach) no_detach=1 ;;
-        --exit-after-play) exit_after_play=1 && no_detach=1 ;;
-        --skip) skip_intro=1 ;;
-
-        *) query="${query} $1"; query="${query# }"; query="${query// /+}" ;;
-    esac
-    shift
-done
+[[ "${1:-}" == "-c" || "${1:-}" == "--continue" ]] && source="history"
 
 dep_ch "curl"
 dep_ch "sed"
