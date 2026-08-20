@@ -20,35 +20,90 @@ anidb_curl() {
 
 # search the query and give results. format is (id \t name)
 anidb_search() {
-    #shellcheck disable=SC2059
-    _page="$(anidb_curl "https://anidb.app/browse?q=$1" | tr '\n' ' ' | sed 's|<a href|\n<a href|g')"
+    _page="$(anidb_curl "https://anidb.app/browse?q=$1")"
     [[ "${_page,,}" == *"just a moment"* ]] && die "Blocked by cloudflare."
-    printf "%s" "$_page" | sed -nE '/anime\/[a-z0-9-]+-[0-9]+.*alt=/ { s|.*anime/([a-z0-9-]+-[0-9]+)".*alt="([^"]+)".*|\1\t\2|; s|&#039;|'\''|g; s|&quot;|"|g; p }'
+    printf "%s" "$_page" | awk -v RS='<a href' '
+        /anime\/[^"]+-[0-9]+"[^>]*title="[^"]+"/ {
+            id=$0;
+            sub(/.*anime\//, "", id);
+            sub(/".*/, "", id);
+            title=$0;
+            sub(/.*title="/, "", title);
+            sub(/".*/, "", title);
+            gsub(/&#039;/, "\047", title);
+            gsub(/&quot;/, "\"", title);
+            print id "\t" title;
+        }
+    '
 }
 
 anidb_desc() {
-    #shellcheck disable=SC2059
-    _page="$(anidb_curl "https://anidb.app/anime/$1" | tr '\n' ' ' | sed 's|<a href|\n<a href|g')"
-    seasons="$(printf "%s" "$_page" | sed -nE '/>Seasons</,/>Details</ { /anime\/[^\"]+-[0-9]+/!d; s|.*anime/([^"]+-[0-9]+)"[^>]*title="([^"]+)".*|\1\t\2|; s|&#039;|'\''|g; p }')"
+    seasons="$(anidb_curl "https://anidb.app/anime/$1" | awk -v RS='<a href' '
+        />Seasons</ { f=1 }
+        />Details</ { f=0 }
+        f && /anime\/[^"]+-[0-9]+"[^>]*title="[^"]+"/ {
+            id=$0;
+            sub(/.*anime\//, "", id);
+            sub(/".*/, "", id);
+            title=$0;
+            sub(/.*title="/, "", title);
+            sub(/".*/, "", title);
+            gsub(/&#039;/, "\047", title);
+            print id "\t" title;
+        }
+    ')"
     [ -n "$seasons" ] && seasons_option="\nchange_season"
 }
 
 # get the episodes list of the selected anime. format is (id \t ep_no)
 anidb_episodes() {
-    #shellcheck disable=SC2059
-    anidb_curl "https://anidb.app/api/frontend/anime/${1##*-}/episodes" | sed 's|},{|}\n{|g' | sed -nE 's|.*"id":([0-9]+).*"number":([0-9]+).*|\1\t\2|p'
+    anidb_curl "https://anidb.app/api/frontend/anime/${1##*-}/episodes" | awk -v RS='{' '
+        /"id":[0-9]+/ && /"number":[0-9]+/ {
+            id=$0;
+            sub(/.*"id":/, "", id);
+            sub(/[^0-9].*/, "", id);
+            ep=$0;
+            sub(/.*"number":/, "", ep);
+            sub(/[^0-9].*/, "", ep);
+            print id "\t" ep;
+        }
+    '
 }
 
 # extract the individual m3u8 links from response of embed urls
 anidb_m3u8() {
-    _ep_id=$(printf "%s" "$episode_maps" | sed -nE "s|^([0-9]+)\t${1}$|\1|p")
+    _ep_id=$(printf "%s" "$episode_maps" | awk -F'\t' -v ep="$1" '$2 == ep {print $1; exit}')
     _lang="jpn"
     [ "$2" = "dub" ] && _lang="eng"
-    #shellcheck disable=SC2059
-    _embed="$(anidb_curl "https://anidb.app/api/frontend/episode/${_ep_id}/languages" | sed 's|},{|}\n{|g' | sed -nE '/'"${_lang}"'.*embed_url/ { s|.*'"${_lang}"'.*embed_url":"([^"]+)".*|\1|; s|\\/|/|g; p }' | head -n 1)"
+    _embed="$(anidb_curl "https://anidb.app/api/frontend/episode/${_ep_id}/languages" | awk -v RS='{' -v lang="\"${_lang}\"" '
+        $0 ~ lang && /"embed_url":"/ {
+            url=$0;
+            sub(/.*"embed_url":"/, "", url);
+            sub(/".*/, "", url);
+            gsub(/\\\//, "/", url);
+            print url;
+            exit;
+        }
+    ')"
     [ -z "$_embed" ] && return 1
-    _m3u8_master="$(anidb_curl "$_embed" | sed -nE "s|.*file: '([^']*)'.*|\1|p" | head -n 1)"
-    anidb_curl "${_m3u8_master}" | sed 's|^#EXT-X-STREAM.*x||g; s|,.*|p|g; /^#/d; $!N; s|\n| >|;/EXT-X-I-FRAME/d'
+    _m3u8_master="$(anidb_curl "$_embed" | awk '
+        /file: \047/ {
+            url=$0;
+            sub(/.*file: \047/, "", url);
+            sub(/\047.*/, "", url);
+            print url;
+            exit;
+        }
+    ')"
+    anidb_curl "${_m3u8_master}" | awk '
+        /#EXT-X-STREAM/ && !/I-FRAME/ {
+            res=$0;
+            sub(/.*x/, "", res);
+            sub(/,.*/, "", res);
+            getline url;
+            print res "p >" url;
+        }
+    '
 }
 
 # gets embed url, collects direct links and selects one with desired quality into $episode
