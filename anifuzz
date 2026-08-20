@@ -110,27 +110,23 @@ anidb_m3u8() {
 get_video_link() {
     links=$(anidb_m3u8 "$ep_no" "$mode" | sort -g -r -s)
     [ -z "$links" ] && die "No sources found for $mode!"
-
-    video_link="${links%%$'\n'*}"
-    video_link="${video_link#*>}"
-    # should never trigger but just in case
-    if [[ $'\n'"$ep_list"$'\n' == *$'\n'"$ep_no"$'\n'* ]]; then
-        [ -z "$video_link" ] && die "Episode is released, but no valid sources!"
-    else
-        [ -z "$video_link" ] && die "Episode not released!"
-    fi
+    IFS=">" read -r _ video_link <<< "$links"
+    [ -z "$video_link" ] && die "Episode is released, but no valid sources!"
 }
 
 update_history() {
     if grep -q "	${anime_id}	" "$histfile"; then
         safe_title="${anime_title//&/\\&}"
         safe_title="${safe_title//|/\\|}"
-        sed -E "s|^[^	]+	${anime_id}	[^	]+$|${ep_no}	${anime_id}	${safe_title}|" "$histfile" >"${histfile}.new"
+        local tmp_hist="${histfile}.$$"
+        if sed -E "s|^[^	]+	${anime_id}	[^	]+$|${ep_no}	${anime_id}	${safe_title}|" "$histfile" > "$tmp_hist"; then
+            mv "$tmp_hist" "$histfile"
+        else
+            rm -f "$tmp_hist"
+        fi
     else
-        cp "$histfile" "${histfile}.new"
-        printf "%s\t%s\t%s\n" "$ep_no" "$anime_id" "$anime_title" >>"${histfile}.new"
+        printf "%s\t%s\t%s\n" "$ep_no" "$anime_id" "$anime_title" >> "$histfile"
     fi
-    mv "${histfile}.new" "$histfile"
 }
 
 play() {
@@ -172,7 +168,7 @@ for dep in curl fuzzel "$player_function"; do
     command -v "$dep" >/dev/null || die "Program $dep not found. Please install it."
 done
 
-trap 'rm -f "${histfile}.new"; exit 1' INT HUP TERM
+
 
 # searching
 case "$source" in
