@@ -9,8 +9,8 @@ All terminal-specific baggage, redundant menus, and useless disk I/O have been r
 ## Requirements
 - `mpv` (Video playback)
 - `fuzzel` (Application launcher/menu)
-- `curl`, `grep`, `sed` (Standard utilities)
-- `ani-skip` (Optional: for skipping intro themes)
+- `curl` (For making web requests)
+- Standard POSIX utilities (`awk`, `grep`, `sed`, `cut`, `nl`, `sort`, `logger`)
 
 ## Installation & Usage
 
