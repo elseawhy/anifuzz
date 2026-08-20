@@ -52,7 +52,7 @@ anidb_desc() {
             print id "\t" title;
         }
     ')"
-    [ -n "$seasons" ] && seasons_option="\nchange_season"
+    [[ -n "$seasons" ]] && seasons_option="\nchange_season"
 }
 
 # get the episodes list of the selected anime. format is (id \t ep_no)
@@ -74,7 +74,7 @@ anidb_episodes() {
 anidb_m3u8() {
     _ep_id=$(printf "%s" "$episode_maps" | awk -F'\t' -v ep="$1" '$2 == ep {print $1; exit}')
     _lang="jpn"
-    [ "$2" = "dub" ] && _lang="eng"
+    [[ "$2" == "dub" ]] && _lang="eng"
     _embed="$(anidb_curl "https://anidb.app/api/frontend/episode/${_ep_id}/languages" | awk -v RS='{' -v lang="\"${_lang}\"" '
         $0 ~ lang && /"embed_url":"/ {
             url=$0;
@@ -85,7 +85,7 @@ anidb_m3u8() {
             exit;
         }
     ')"
-    [ -z "$_embed" ] && return 1
+    [[ -z "$_embed" ]] && return 1
     _m3u8_master="$(anidb_curl "$_embed" | awk '
         /file: \047/ {
             url=$0;
@@ -109,9 +109,9 @@ anidb_m3u8() {
 # gets embed url, collects direct links and selects one with desired quality into $episode
 get_video_link() {
     links=$(anidb_m3u8 "$ep_no" "$mode" | sort -g -r -s)
-    [ -z "$links" ] && die "No sources found for $mode!"
+    [[ -z "$links" ]] && die "No sources found for $mode!"
     IFS=">" read -r _ video_link <<< "$links"
-    [ -z "$video_link" ] && die "Episode is released, but no valid sources!"
+    [[ -z "$video_link" ]] && die "Episode is released, but no valid sources!"
 }
 
 update_history() {
@@ -132,23 +132,18 @@ update_history() {
 play() {
     # In case a range (e.g. 5-10) or multi-select was passed, just grab the first episode
     ep_no="${ep_no%%[ -]*}"
-    [ -z "$ep_no" ] && ep_no="${ep_list%%$'\n'*}"
+    [[ -z "$ep_no" ]] && ep_no="${ep_list%%$'\n'*}"
     [[ $'\n'"$ep_list"$'\n' == *$'\n'"$ep_no"$'\n'* ]] || die "Invalid episode!"
+    [[ "$log_episode" == 1 ]] && logger -t anifuzz "${anime_title} ${ep_no}" 2>/dev/null
+    [[ -z "$video_link" ]] && get_video_link
     
-    [ "$log_episode" = 1 ] && command -v logger >/dev/null && logger -t anifuzz "${anime_title} ${ep_no}"
-    [ -z "$video_link" ] && get_video_link
-    # shellcheck disable=SC2086
-    if [ "$no_detach" = 0 ]; then
-        nohup $player_function $player_extra_flags --force-media-title="${anime_title} Episode ${ep_no}" "$video_link" >/dev/null 2>&1 &
-    else
-        $player_function $player_extra_flags --force-media-title="${anime_title} Episode ${ep_no}" "$video_link"
-        mpv_exitcode=$?
-        [ "$exit_after_play" = 1 ] && exit "$mpv_exitcode"
-    fi
+    $player_function $player_extra_flags --force-media-title="${anime_title} Episode ${ep_no}" "$video_link"
+    mpv_exitcode=$?
     replay="$video_link"
     unset video_link
     update_history
-    wait
+    
+    [[ "$exit_after_play" == 1 ]] && exit "$mpv_exitcode"
 }
 
 # MAIN
@@ -156,27 +151,24 @@ mode="${ANI_CLI_MODE:-sub}"
 log_episode="${ANI_CLI_LOG:-1}"
 player_function="${ANI_CLI_PLAYER:-mpv}"
 player_extra_flags="${ANI_CLI_PLAYER_FLAGS:-""}"
-no_detach="${ANI_CLI_NO_DETACH:-0}"
 exit_after_play="${ANI_CLI_EXIT_AFTER_PLAY:-0}"
 menu_extra_flags="${ANI_CLI_MENU_FLAGS:-"-w 70 -l 15"}"
 histfile="${ANI_CLI_HIST_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/anifuzz}/ani-hsts"
 mkdir -p "${histfile%/*}"
-[ ! -f "$histfile" ] && : >"$histfile"
+[[ ! -f "$histfile" ]] && : >"$histfile"
 [[ "${1:-}" == "-c" || "${1:-}" == "--continue" ]] && source="history"
 
 for dep in curl fuzzel "$player_function"; do
     command -v "$dep" >/dev/null || die "Program $dep not found. Please install it."
 done
 
-
-
 # searching
 case "$source" in
     history)
         anime_list=$(awk -F'\t' '{printf "%s\t%s (watched ep %s)\n", $2, $3, $1}' "$histfile")
-        [ -z "$anime_list" ] && die "History empty!"
+        [[ -z "$anime_list" ]] && die "History empty!"
         result=$(printf "%s" "$anime_list" | nl -w1 -s"	" | nth "Select anime: ")
-        [ -z "$result" ] && exit 1
+        [[ -z "$result" ]] && exit 1
         anime_id="${result%%	*}"
         anime_title="${result#*	}"
         ep_no="${anime_title##*(watched ep }"
@@ -188,23 +180,23 @@ case "$source" in
         
         # Find next episode or fallback to current
         next_ep=$(printf "%s" "$ep_list" | sed -n "/^${ep_no}$/{n;p;}") 2>/dev/null
-        [ -n "$next_ep" ] && ep_no="$next_ep"
+        [[ -n "$next_ep" ]] && ep_no="$next_ep"
         ;;
     *)
-        [ -z "$query" ] && query=$(fuzzel -d --prompt-only="Search anime: " $menu_extra_flags 2>/dev/null)
-        [ -z "$query" ] && exit 1
+        [[ -z "$query" ]] && query=$(fuzzel -d --prompt-only="Search anime: " $menu_extra_flags 2>/dev/null)
+        [[ -z "$query" ]] && exit 1
         query="${query// /+}"
         anime_list=$(anidb_search "$query")
-        [ -z "$anime_list" ] && die "No results found!"
+        [[ -z "$anime_list" ]] && die "No results found!"
         result=$(printf "%s" "$anime_list" | nl -w1 -s"	" | nth "Select anime: ")
-        [ -z "$result" ] && exit 1
+        [[ -z "$result" ]] && exit 1
         anime_title="${result#*	}"
         anime_id="${result%%	*}"
         anidb_desc "$anime_id" || true
         episode_maps="$(anidb_episodes "$anime_id")"
         ep_list="$(printf '%s' "$episode_maps" | cut -f 2)"
         ep_no=$(printf "%s" "$ep_list" | nth "Select episode: ")
-        [ -z "$ep_no" ] && exit 1
+        [[ -z "$ep_no" ]] && exit 1
         ;;
 esac
 
@@ -220,21 +212,21 @@ while cmd=$(printf "next\nreplay\nprevious\nselect$seasons_option\nquit" | nth "
         select) ep_no=$(printf "%s" "$ep_list" | nth "Select episode: ") ;;
         change_season)
             new_anime="$(printf "%s" "$seasons" | nl -w1 -s"	" | nth "Select season: ")"
-            [ -z "$new_anime" ] && exit 1
+            [[ -z "$new_anime" ]] && exit 1
             anime_title="${new_anime#*	}"
             anime_id="${new_anime%%	*}"
             anidb_desc "$anime_id" || true
             episode_maps="$(anidb_episodes "$anime_id")"
             ep_list="$(printf '%s' "$episode_maps" | cut -f 2)"
             ep_no=$(printf "%s" "$ep_list" | nth "Select episode: ")
-            [ -z "$ep_no" ] && exit 1
+            [[ -z "$ep_no" ]] && exit 1
             ;;
         *)
             rm -f "${histfile}.new"
             exit 0
             ;;
     esac
-    [ -z "$ep_no" ] && die "Out of range"
+    [[ -z "$ep_no" ]] && die "Out of range"
     play
 done
 
