@@ -22,24 +22,21 @@ anidb_curl() {
 anidb_search() {
     #shellcheck disable=SC2059
     _page="$(anidb_curl "https://anidb.app/browse?q=$1" | tr '\n' ' ' | sed 's|<a href|\n<a href|g')"
-    if [[ "${_page,,}" == *"just a moment"* ]]; then
-        die "Blocked by cloudflare."
-    fi
-    printf "%s" "$_page" | sed -nE 's|.*anime/([a-z0-9-]+-[0-9]+)".*alt="([^"]+)".*|\1\t\2|p' | sed -e "s|&#039;|'|g" -e 's|&quot;|"|g'
+    [[ "${_page,,}" == *"just a moment"* ]] && die "Blocked by cloudflare."
+    printf "%s" "$_page" | sed -nE '/anime\/[a-z0-9-]+-[0-9]+.*alt=/ { s|.*anime/([a-z0-9-]+-[0-9]+)".*alt="([^"]+)".*|\1\t\2|; s|&#039;|'\''|g; s|&quot;|"|g; p }'
 }
 
 anidb_desc() {
     #shellcheck disable=SC2059
     _page="$(anidb_curl "https://anidb.app/anime/$1" | tr '\n' ' ' | sed 's|<a href|\n<a href|g')"
-    seasons="$(printf "%s" "$_page" | sed -n '/>Seasons</,/>Details</p' | sed -nE 's|.*anime/([^"]+-[0-9]+)"[^>]*title="([^"]+)".*|\1\t\2|p' | sed -e "s|&#039;|'|g")"
+    seasons="$(printf "%s" "$_page" | sed -nE '/>Seasons</,/>Details</ { /anime\/[^\"]+-[0-9]+/!d; s|.*anime/([^"]+-[0-9]+)"[^>]*title="([^"]+)".*|\1\t\2|; s|&#039;|'\''|g; p }')"
     [ -n "$seasons" ] && seasons_option="\nchange_season"
 }
 
 # get the episodes list of the selected anime. format is (id \t ep_no)
 anidb_episodes() {
     #shellcheck disable=SC2059
-    _page="$(anidb_curl "https://anidb.app/api/frontend/anime/${1##*-}/episodes")"
-    printf "%s" "$_page" | sed 's|},{|}\n{|g' | sed -nE 's|.*"id":([0-9]+).*"number":([0-9]+).*|\1\t\2|p'
+    anidb_curl "https://anidb.app/api/frontend/anime/${1##*-}/episodes" | sed 's|},{|}\n{|g' | sed -nE 's|.*"id":([0-9]+).*"number":([0-9]+).*|\1\t\2|p'
 }
 
 # extract the individual m3u8 links from response of embed urls
@@ -48,11 +45,9 @@ anidb_m3u8() {
     _lang="jpn"
     [ "$2" = "dub" ] && _lang="eng"
     #shellcheck disable=SC2059
-    _page="$(anidb_curl "https://anidb.app/api/frontend/episode/${_ep_id}/languages")"
-    _embed="$(printf "%s" "$_page" | sed 's|},{|}\n{|g' | sed -nE 's|.*'"${_lang}"'.*embed_url":"([^"]+)".*|\1|p' | sed 's|\\/|/|g' | head -n 1)"
+    _embed="$(anidb_curl "https://anidb.app/api/frontend/episode/${_ep_id}/languages" | sed 's|},{|}\n{|g' | sed -nE '/'"${_lang}"'.*embed_url/ { s|.*'"${_lang}"'.*embed_url":"([^"]+)".*|\1|; s|\\/|/|g; p }' | head -n 1)"
     [ -z "$_embed" ] && return 1
-    _embed_page="$(anidb_curl "$_embed")"
-    _m3u8_master="$(printf "%s" "$_embed_page" | sed -nE "s|.*file: '([^']*)'.*|\1|p" | head -n 1)"
+    _m3u8_master="$(anidb_curl "$_embed" | sed -nE "s|.*file: '([^']*)'.*|\1|p" | head -n 1)"
     anidb_curl "${_m3u8_master}" | sed 's|^#EXT-X-STREAM.*x||g; s|,.*|p|g; /^#/d; $!N; s|\n| >|;/EXT-X-I-FRAME/d'
 }
 
@@ -73,7 +68,6 @@ get_video_link() {
 
 update_history() {
     if grep -q "	${anime_id}	" "$histfile"; then
-        # escape sed special chars in replacement: & and \ and delimiter |
         safe_title="${anime_title//&/\\&}"
         safe_title="${safe_title//|/\\|}"
         sed -E "s|^[^	]+	${anime_id}	[^	]+$|${ep_no}	${anime_id}	${safe_title}|" "$histfile" >"${histfile}.new"
@@ -86,8 +80,7 @@ update_history() {
 
 play() {
     # In case a range (e.g. 5-10) or multi-select was passed, just grab the first episode
-    ep_no="${ep_no%% *}"
-    ep_no="${ep_no%%-*}"
+    ep_no="${ep_no%%[ -]*}"
     [ -z "$ep_no" ] && ep_no="${ep_list%%$'\n'*}"
     [[ $'\n'"$ep_list"$'\n' == *$'\n'"$ep_no"$'\n'* ]] || die "Invalid episode!"
     
