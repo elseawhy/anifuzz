@@ -113,12 +113,16 @@ get_video_link() {
 
 update_history() {
     local tmp_hist="${histfile}.$$"
-    awk -F'\t' -v ep="$ep_no" -v id="$anime_id" -v title="$anime_title" '
+    if awk -F'\t' -v ep="$ep_no" -v id="$anime_id" -v title="$anime_title" '
         BEGIN { OFS="\t"; found=0 }
         $2 == id { $1 = ep; $3 = title; found=1 }
         { print }
         END { if (!found) print ep, id, title }
-    ' "$histfile" > "$tmp_hist" && mv "$tmp_hist" "$histfile" || rm -f "$tmp_hist"
+    ' "$histfile" > "$tmp_hist"; then
+        mv "$tmp_hist" "$histfile"
+    else
+        rm -f "$tmp_hist"
+    fi
 }
 
 play() {
@@ -129,8 +133,7 @@ play() {
     [[ "$log_episode" == 1 ]] && logger -t anifuzz "${anime_title} ${ep_no}" 2>/dev/null
     [[ -z "$video_link" ]] && get_video_link
     $player_function $player_extra_flags --force-media-title="${anime_title} Episode ${ep_no}" "$video_link"
-    mpv_exitcode=$?
-    replay="$video_link"
+    local mpv_exitcode=$? replay="$video_link"
     unset video_link
     update_history
     [[ "$exit_after_play" == 1 ]] && exit "$mpv_exitcode"
