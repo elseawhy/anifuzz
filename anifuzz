@@ -86,7 +86,7 @@ anidb_m3u8() {
         }
     ')"
     [[ -z "$_embed" ]] && return 1
-    _m3u8_master="$(anidb_curl "$_embed" | awk '
+    anidb_curl "$(anidb_curl "$_embed" | awk '
         /file: \047/ {
             url=$0;
             sub(/.*file: \047/, "", url);
@@ -94,8 +94,7 @@ anidb_m3u8() {
             print url;
             exit;
         }
-    ')"
-    anidb_curl "${_m3u8_master}" | awk '
+    ')" | awk '
         /#EXT-X-STREAM/ && !/I-FRAME/ {
             res=$0;
             sub(/.*x/, "", res);
@@ -108,25 +107,18 @@ anidb_m3u8() {
 
 # gets embed url, collects direct links and selects one with desired quality into $episode
 get_video_link() {
-    links=$(anidb_m3u8 "$ep_no" "$mode" | sort -g -r -s)
-    [[ -z "$links" ]] && die "No sources found for $mode!"
-    IFS=">" read -r _ video_link <<< "$links"
-    [[ -z "$video_link" ]] && die "Episode is released, but no valid sources!"
+    IFS=">" read -r _ video_link < <(anidb_m3u8 "$ep_no" "$mode" | sort -g -r -s)
+    [[ -z "$video_link" ]] && die "No valid sources found for $mode!"
 }
 
 update_history() {
-    if grep -q "	${anime_id}	" "$histfile"; then
-        safe_title="${anime_title//&/\\&}"
-        safe_title="${safe_title//|/\\|}"
-        local tmp_hist="${histfile}.$$"
-        if sed -E "s|^[^	]+	${anime_id}	[^	]+$|${ep_no}	${anime_id}	${safe_title}|" "$histfile" > "$tmp_hist"; then
-            mv "$tmp_hist" "$histfile"
-        else
-            rm -f "$tmp_hist"
-        fi
-    else
-        printf "%s\t%s\t%s\n" "$ep_no" "$anime_id" "$anime_title" >> "$histfile"
-    fi
+    local tmp_hist="${histfile}.$$"
+    awk -F'\t' -v ep="$ep_no" -v id="$anime_id" -v title="$anime_title" '
+        BEGIN { OFS="\t"; found=0 }
+        $2 == id { $1 = ep; $3 = title; found=1 }
+        { print }
+        END { if (!found) print ep, id, title }
+    ' "$histfile" > "$tmp_hist" && mv "$tmp_hist" "$histfile" || rm -f "$tmp_hist"
 }
 
 play() {
@@ -136,13 +128,11 @@ play() {
     [[ $'\n'"$ep_list"$'\n' == *$'\n'"$ep_no"$'\n'* ]] || die "Invalid episode!"
     [[ "$log_episode" == 1 ]] && logger -t anifuzz "${anime_title} ${ep_no}" 2>/dev/null
     [[ -z "$video_link" ]] && get_video_link
-    
     $player_function $player_extra_flags --force-media-title="${anime_title} Episode ${ep_no}" "$video_link"
     mpv_exitcode=$?
     replay="$video_link"
     unset video_link
     update_history
-    
     [[ "$exit_after_play" == 1 ]] && exit "$mpv_exitcode"
 }
 
