@@ -24,10 +24,9 @@ anidb_search() {
     [[ "${_page,,}" == *"just a moment"* ]] && die "Blocked by cloudflare."
     printf "%s" "$_page" | awk -v RS='<a href' '
         /anime\/[^"]+-[0-9]+"[^>]*title="[^"]+"/ {
-            id=$0;
+            id = title = $0;
             sub(/.*anime\//, "", id);
             sub(/".*/, "", id);
-            title=$0;
             sub(/.*title="/, "", title);
             sub(/".*/, "", title);
             gsub(/&#039;/, "\047", title);
@@ -42,10 +41,9 @@ anidb_desc() {
         />Seasons</ { f=1 }
         />Details</ { f=0 }
         f && /anime\/[^"]+-[0-9]+"[^>]*title="[^"]+"/ {
-            id=$0;
+            id = title = $0;
             sub(/.*anime\//, "", id);
             sub(/".*/, "", id);
-            title=$0;
             sub(/.*title="/, "", title);
             sub(/".*/, "", title);
             gsub(/&#039;/, "\047", title);
@@ -59,10 +57,9 @@ anidb_desc() {
 anidb_episodes() {
     anidb_curl "https://anidb.app/api/frontend/anime/${1##*-}/episodes" | awk -v RS='{' '
         /"id":[0-9]+/ && /"number":[0-9]+/ {
-            id=$0;
+            id = ep = $0;
             sub(/.*"id":/, "", id);
             sub(/[^0-9].*/, "", id);
-            ep=$0;
             sub(/.*"number":/, "", ep);
             sub(/[^0-9].*/, "", ep);
             print id "\t" ep;
@@ -77,28 +74,26 @@ anidb_m3u8() {
     [[ "$2" == "dub" ]] && _lang="eng"
     _embed="$(anidb_curl "https://anidb.app/api/frontend/episode/${_ep_id}/languages" | awk -v RS='{' -v lang="\"${_lang}\"" '
         $0 ~ lang && /"embed_url":"/ {
-            url=$0;
-            sub(/.*"embed_url":"/, "", url);
-            sub(/".*/, "", url);
-            gsub(/\\\//, "/", url);
-            print url;
+            sub(/.*"embed_url":"/, "");
+            sub(/".*/, "");
+            gsub(/\\\//, "/");
+            print;
             exit;
         }
     ')"
     [[ -z "$_embed" ]] && return 1
     anidb_curl "$(anidb_curl "$_embed" | awk '
         /file: \047/ {
-            url=$0;
-            sub(/.*file: \047/, "", url);
-            sub(/\047.*/, "", url);
-            print url;
+            sub(/.*file: \047/, "");
+            sub(/\047.*/, "");
+            print;
             exit;
         }
     ')" | awk '
         /#EXT-X-STREAM/ && !/I-FRAME/ {
+            sub(/.*x/, "");
+            sub(/,.*/, "");
             res=$0;
-            sub(/.*x/, "", res);
-            sub(/,.*/, "", res);
             getline url;
             print res "p >" url;
         }
@@ -116,7 +111,7 @@ update_history() {
     if awk -F'\t' -v ep="$ep_no" -v id="$anime_id" -v title="$anime_title" '
         BEGIN { OFS="\t"; found=0 }
         $2 == id { $1 = ep; $3 = title; found=1 }
-        { print }
+        1
         END { if (!found) print ep, id, title }
     ' "$histfile" > "$tmp_hist"; then
         mv "$tmp_hist" "$histfile"
