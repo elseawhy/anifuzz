@@ -22,7 +22,7 @@ anidb_curl() {
 anidb_search() {
     _page="$(anidb_curl "https://anidb.app/browse?q=$1")"
     [[ "${_page,,}" == *"just a moment"* ]] && die "Blocked by cloudflare."
-    printf "%s" "$_page" | awk -v RS='<a href' '
+    <<<"$_page" awk -v RS='<a href' '
         /anime\/[^"]+-[0-9]+"[^>]*title="[^"]+"/ {
             id = title = $0;
             sub(/.*anime\//, "", id);
@@ -69,10 +69,9 @@ anidb_episodes() {
 
 # extract the individual m3u8 links from response of embed urls
 anidb_m3u8() {
-    _ep_id=$(printf "%s" "$episode_maps" | awk -F'\t' -v ep="$1" '$2 == ep {print $1; exit}')
     _lang="jpn"
     [[ "$2" == "dub" ]] && _lang="eng"
-    _embed="$(anidb_curl "https://anidb.app/api/frontend/episode/${_ep_id}/languages" | awk -v RS='{' -v lang="\"${_lang}\"" '
+    _embed="$(anidb_curl "https://anidb.app/api/frontend/episode/$(awk -F'\t' -v ep="$1" '$2 == ep {print $1; exit}' <<<"$episode_maps")/languages" | awk -v RS='{' -v lang="\"${_lang}\"" '
         $0 ~ lang && /"embed_url":"/ {
             sub(/.*"embed_url":"/, "");
             sub(/".*/, "");
@@ -100,12 +99,6 @@ anidb_m3u8() {
     '
 }
 
-# gets embed url, collects direct links and selects one with desired quality into $episode
-get_video_link() {
-    IFS=">" read -r _ video_link < <(anidb_m3u8 "$ep_no" "$mode" | sort -g -r -s)
-    [[ -z "$video_link" ]] && die "No valid sources found for $mode!"
-}
-
 update_history() {
     local tmp_hist="${histfile}.$$"
     if awk -F'\t' -v ep="$ep_no" -v id="$anime_id" -v title="$anime_title" '
@@ -126,7 +119,10 @@ play() {
     [[ -z "$ep_no" ]] && ep_no="${ep_list%%$'\n'*}"
     [[ $'\n'"$ep_list"$'\n' == *$'\n'"$ep_no"$'\n'* ]] || die "Invalid episode!"
     [[ "$log_episode" == 1 ]] && logger -t anifuzz "${anime_title} ${ep_no}" 2>/dev/null
-    [[ -z "$video_link" ]] && get_video_link
+    [[ -z "$video_link" ]] && {
+        IFS=">" read -r _ video_link < <(anidb_m3u8 "$ep_no" "$mode" | sort -g -r -s)
+        [[ -z "$video_link" ]] && die "No valid sources found for $mode!"
+    }
     $player_function $player_extra_flags --force-media-title="${anime_title} Episode ${ep_no}" "$video_link"
     local mpv_exitcode=$? replay="$video_link"
     unset video_link
@@ -153,10 +149,8 @@ done
 # searching
 case "$source" in
     history)
-        anime_list=$(awk -F'\t' '{printf "%s\t%s (watched ep %s)\n", $2, $3, $1}' "$histfile")
-        [[ -z "$anime_list" ]] && die "History empty!"
-        result=$(printf "%s" "$anime_list" | nl -w1 -s"	" | nth "Select anime: ")
-        [[ -z "$result" ]] && exit 1
+        result=$(awk -F'\t' '{printf "%s\t%s (watched ep %s)\n", $2, $3, $1}' "$histfile" | nl -w1 -s"	" | nth "Select anime: ")
+        [[ -z "$result" ]] && die "History empty or cancelled!"
         anime_id="${result%%	*}"
         anime_title="${result#*	}"
         ep_no="${anime_title##*(watched ep }"
@@ -164,26 +158,24 @@ case "$source" in
         anime_title="${anime_title% (watched ep *}"
         anidb_desc "$anime_id" || true
         episode_maps="$(anidb_episodes "$anime_id")"
-        ep_list="$(printf "%s" "$episode_maps" | cut -f 2)"
+        ep_list="$(cut <<<"$episode_maps" -f 2)"
         
         # Find next episode or fallback to current
-        next_ep=$(printf "%s" "$ep_list" | sed -n "/^${ep_no}$/{n;p;}") 2>/dev/null
+        next_ep=$(<<<"$ep_list" sed -n "/^${ep_no}$/{n;p;}") 2>/dev/null
         [[ -n "$next_ep" ]] && ep_no="$next_ep"
         ;;
     *)
         [[ -z "$query" ]] && query=$(fuzzel -d --prompt-only="Search anime: " $menu_extra_flags 2>/dev/null)
         [[ -z "$query" ]] && exit 1
         query="${query// /+}"
-        anime_list=$(anidb_search "$query")
-        [[ -z "$anime_list" ]] && die "No results found!"
-        result=$(printf "%s" "$anime_list" | nl -w1 -s"	" | nth "Select anime: ")
-        [[ -z "$result" ]] && exit 1
+        result=$(anidb_search "$query" | nl -w1 -s"	" | nth "Select anime: ")
+        [[ -z "$result" ]] && die "No results found or cancelled!"
         anime_title="${result#*	}"
         anime_id="${result%%	*}"
         anidb_desc "$anime_id" || true
         episode_maps="$(anidb_episodes "$anime_id")"
-        ep_list="$(printf '%s' "$episode_maps" | cut -f 2)"
-        ep_no=$(printf "%s" "$ep_list" | nth "Select episode: ")
+        ep_list="$(cut <<<"$episode_maps" -f 2)"
+        ep_no=$(<<<"$ep_list" nth "Select episode: ")
         [[ -z "$ep_no" ]] && exit 1
         ;;
 esac
@@ -194,19 +186,19 @@ play
 #shellcheck disable=SC2059
 while cmd=$(printf "next\nreplay\nprevious\nselect$seasons_option\nquit" | nth "Playing episode $ep_no of $anime_title... "); do
     case "$cmd" in
-        next) ep_no=$(printf "%s" "$ep_list" | sed -n "/^${ep_no}$/{n;p;}") 2>/dev/null ;;
+        next) ep_no=$(<<<"$ep_list" sed -n "/^${ep_no}$/{n;p;}") 2>/dev/null ;;
         replay) video_link="$replay" ;;
-        previous) ep_no=$(printf "%s" "$ep_list" | sed -n "/^${ep_no}$/{g;1!p;};h") 2>/dev/null ;;
-        select) ep_no=$(printf "%s" "$ep_list" | nth "Select episode: ") ;;
+        previous) ep_no=$(<<<"$ep_list" sed -n "/^${ep_no}$/{g;1!p;};h") 2>/dev/null ;;
+        select) ep_no=$(<<<"$ep_list" nth "Select episode: ") ;;
         change_season)
-            new_anime="$(printf "%s" "$seasons" | nl -w1 -s"	" | nth "Select season: ")"
+            new_anime="$(<<<"$seasons" nl -w1 -s"	" | nth "Select season: ")"
             [[ -z "$new_anime" ]] && exit 1
             anime_title="${new_anime#*	}"
             anime_id="${new_anime%%	*}"
             anidb_desc "$anime_id" || true
             episode_maps="$(anidb_episodes "$anime_id")"
-            ep_list="$(printf '%s' "$episode_maps" | cut -f 2)"
-            ep_no=$(printf "%s" "$ep_list" | nth "Select episode: ")
+            ep_list="$(cut <<<"$episode_maps" -f 2)"
+            ep_no=$(<<<"$ep_list" nth "Select episode: ")
             [[ -z "$ep_no" ]] && exit 1
             ;;
         *)
