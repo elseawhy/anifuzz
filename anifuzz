@@ -31,6 +31,7 @@ anidb_search() {
             sub(/".*/, "", title);
             gsub(/&#039;/, "\047", title);
             gsub(/&quot;/, "\"", title);
+            gsub(/&amp;/, "\\&", title);
             print id "\t" title;
         }
     '
@@ -47,6 +48,8 @@ anidb_desc() {
             sub(/.*title="/, "", title);
             sub(/".*/, "", title);
             gsub(/&#039;/, "\047", title);
+            gsub(/&quot;/, "\"", title);
+            gsub(/&amp;/, "\\&", title);
             print id "\t" title;
         }
     ')"
