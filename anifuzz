@@ -5,7 +5,7 @@ nth() {
     mapfile -t lines
     (( ${#lines[@]} == 0 )) && return 1
     (( ${#lines[@]} == 1 )) && printf "%s\n" "${lines[0]#*$'\t'}" && return 0
-    local idx=$(printf "%s\n" "${lines[@]}" | awk -F'\t' '{ print $1 ($3 ? " " $3 : ($2 ? " " $2 : "")) }' | fuzzel -d -p "$1" --index $menu_extra_flags)
+    local idx=$(IFS=$'\n'; awk -F'\t' '{ print $1 ($3 ? " " $3 : ($2 ? " " $2 : "")) }' <<< "${lines[*]}" | fuzzel -d -p "$1" --index $menu_extra_flags)
     [[ -n "$idx" && "$idx" =~ ^[0-9]+$ ]] && printf "%s\n" "${lines[idx]#*$'\t'}"
 }
 
@@ -19,18 +19,14 @@ hianime_curl() {
 }
 
 b64_decode() {
-    printf "%s\n" "$1" | base64 -d 2>/dev/null || printf "%s\n" "$1" | base64 -D 2>/dev/null || printf "%s\n" "$1" | openssl base64 -d -A 2>/dev/null
+    base64 -d <<< "$1" 2>/dev/null || base64 -D <<< "$1" 2>/dev/null || openssl base64 -d -A <<< "$1" 2>/dev/null
 }
 
 deobfuscate_blob() (
-    _bytes="$(b64_decode "$1" | od -v -An -tu1)"
-    set -- 111 116 97 107 117 45 101 109 98 101 100 45 118 49
-    _output=""
-    for _byte in $_bytes; do
-        _char=$((_byte ^ $1))
-        _output="${_output}\\0$((_char / 64))$(((_char / 8) % 8))$((_char % 8))"
-        set -- "$@" "$1"
-        shift
+    local key=(111 116 97 107 117 45 101 109 98 101 100 45 118 49) _output="" i=0 _char
+    for _byte in $(b64_decode "$1" | od -v -An -tu1); do
+        _char=$((_byte ^ key[i++ % 14]))
+        _output+=\\0$((_char / 64))$(((_char / 8) % 8))$((_char % 8))
     done
     printf "%b" "$_output"
 )
@@ -39,18 +35,17 @@ deobfuscate_blob() (
 hianime_search() {
     _page="$(hianime_curl "https://hianime.at/search?keyword=$1")"
     [[ "${_page,,}" == *"<title>just a moment"* ]] && die "Blocked by cloudflare."
-    <<<"$_page" awk -v RS='<div class="film-detail">' '
+    <<<"$_page" awk -v RS='<a href="https://hianime.at/watch/' '
         /id="main-sidebar"/ { exit }
-        /<h3 class="film-name">/ && /href="[^"]*"/ && /title="[^"]*"/ {
+        /^[^"]+"/ && /title="[^"]+"/ {
             id = title = $0;
-            sub(/.*href="[^"]*\//, "", id);
             sub(/".*/, "", id);
             sub(/.*title="/, "", title);
             sub(/".*/, "", title);
             gsub(/&#039;/, "\047", title);
             gsub(/&quot;/, "\"", title);
             gsub(/&amp;/, "\\&", title);
-            print id "\t" title;
+            if (id ~ /^[a-zA-Z0-9-]+$/) print id "\t" title;
         }
     '
 }
@@ -73,20 +68,43 @@ hianime_episodes() {
 # extract the individual m3u8 links from response of embed urls
 hianime_m3u8() {
     _embed="$(b64_decode "$(hianime_curl "https://hianime.at/api/theme/episode/servers?episodeId=$(awk -F'\t' -v ep="$1" '$2 == ep {print $1; exit}' <<<"$episode_maps")" | awk -v type="$2" -v RS='server-item' '
-        { gsub(/\\"/, "\"") }
+        {
+            gsub(/\\"/, "\"");
+        }
         index($0, "data-type=\"" type "\"") > 0 && /data-server-name="ZokoAnime"/ {
             sub(/.*data-hash="/, "");
             sub(/".*/, "");
-            print; exit;
+            print;
+            exit;
         }
     ')")"
     [[ -z "$_embed" ]] && return 1
-    refr="$(<<<"$_embed" awk -F/ '{print $1 "//" $3 "/"}')"
-    mal_id="$(<<<"$_embed" awk '/\/mal\/[0-9]+\// { sub(/.*\/mal\//, ""); sub(/\/.*/, ""); print; exit }')"
-    _json="$(deobfuscate_blob "$(hianime_curl "$_embed" | awk '/window\.__P="/ { sub(/.*window\.__P="/, ""); sub(/".*/, ""); print; exit }')")"
-    _m3u8_master="$(<<<"$_json" awk -v RS='"src":"' '/\.m3u8/ { sub(/".*/, ""); print; exit }')"
+    IFS=/ read -r p1 p2 p3 _ <<< "$_embed"
+    refr="$p1//$p3/"
+    _json="$(deobfuscate_blob "$(hianime_curl "$_embed" | awk '
+        /window\.__P="/ {
+            sub(/.*window\.__P="/, "");
+            sub(/".*/, "");
+            print;
+            exit;
+        }
+    ')")"
+    _m3u8_master="$(<<<"$_json" awk -v RS='"src":"' '
+        /\.m3u8/ {
+            sub(/".*/, "");
+            print;
+            exit;
+        }
+    ')"
     [[ -z "$_m3u8_master" ]] && return 1
-    sub_link="$(<<<"$_json" awk -v RS='},{' '/"default":true/ && /"src":"[^"]*"/ { sub(/.*"src":"/, ""); sub(/".*/, ""); print; exit }')"
+    sub_link="$(<<<"$_json" awk -v RS='},{' '
+        /"default":true/ && /"src":"[^"]*"/ {
+            sub(/.*"src":"/, "");
+            sub(/".*/, "");
+            print;
+            exit;
+        }
+    ')"
     links="$(hianime_curl "$_m3u8_master" -e "$refr" | awk -v pre="${_m3u8_master%/*}/" '
         /#EXT-X-STREAM/ && !/I-FRAME/ {
             sub(/.*x/, "");
@@ -96,15 +114,19 @@ hianime_m3u8() {
             if (url !~ /^https?:\/\//) url = pre url;
             print res "p >" url;
         }
-    ' | sort -g -r -s)"
+    ' | LC_ALL=C sort -g -r -s)"
     [[ -n "$links" ]]
 }
 
 update_history() {
     local tmp_hist="${histfile}.$$"
     if awk -F'\t' -v ep="$ep_no" -v id="$anime_id" -v title="$anime_title" '
-        BEGIN { OFS="\t"; found=0 }
-        $2 == id { $1 = ep; $3 = title; found=1 }
+        BEGIN { OFS="\t" }
+        $2 == id {
+            $1 = ep;
+            $3 = title;
+            found=1;
+        }
         1
         END { if (!found) print ep, id, title }
     ' "$histfile" > "$tmp_hist"; then
@@ -122,7 +144,7 @@ play() {
     [[ "$log_episode" == 1 ]] && logger -t anifuzz "${anime_title} ${ep_no}" 2>/dev/null
     [[ -z "$video_link" ]] && {
         hianime_m3u8 "$ep_no" "$mode"
-        IFS=">" read -r _ video_link <<< "$(sort -g -r -s <<< "$links")"
+        IFS=">" read -r _ video_link <<< "$(LC_ALL=C sort -g -r -s <<< "$links")"
         [[ -z "$video_link" ]] && die "No valid sources found for $mode!"
     }
     local player_args=()
