@@ -179,9 +179,9 @@ case "$source" in
         result=$(awk -F'\t' '{printf "%s\t%s (watched ep %s)\n", $2, $3, $1}' "$histfile" | nl -w1 -s"	" | nth "Select anime: ")
         [[ -z "$result" ]] && die "History empty or cancelled!"
         anime_id="${result%%	*}"
-        anime_title="${result#*	}"
-        ep_no="${anime_title##*(watched ep }"
+        ep_no="${result##*(watched ep }"
         ep_no="${ep_no%)}"
+        anime_title="${result#*	}"
         anime_title="${anime_title% (watched ep *}"
         episode_maps="$(hianime_episodes "$anime_id")"
         ep_list="$(cut <<<"$episode_maps" -f 2)"
@@ -193,8 +193,7 @@ case "$source" in
     *)
         [[ -z "$query" ]] && query=$(fuzzel -d --prompt-only="Search anime: " $menu_extra_flags 2>/dev/null)
         [[ -z "$query" ]] && exit 1
-        query="${query// /+}"
-        result=$(hianime_search "$query" | nl -w1 -s"	" | nth "Select anime: ")
+        result=$(hianime_search "${query// /+}" | nl -w1 -s"	" | nth "Select anime: ")
         [[ -z "$result" ]] && die "No results found or cancelled!"
         anime_title="${result#*	}"
         anime_id="${result%%	*}"
