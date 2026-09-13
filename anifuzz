@@ -37,13 +37,12 @@ hianime_search() {
     [[ "${_page,,}" == *"<title>just a moment"* ]] && die "Blocked by cloudflare."
     <<<"$_page" awk -v RS='<a href="https://hianime.at/watch/' '
         /^[^"]+"/ && match($0, /title="[^"]+"/) {
-            id = $0;
-            sub(/".*/, "", id);
             title = substr($0, RSTART + 7, RLENGTH - 8);
             gsub(/&#039;/, "\047", title);
             gsub(/&quot;/, "\"", title);
             gsub(/&amp;/, "\\&", title);
-            if (id ~ /^[a-zA-Z0-9-]+$/) print id "\t" title;
+            sub(/".*/, "", $0);
+            if ($0 ~ /^[a-zA-Z0-9-]+$/) print $0 "\t" title;
         }
         /id="main-sidebar"/ { exit }
     '
@@ -53,11 +52,10 @@ hianime_search() {
 hianime_episodes() {
     hianime_curl "https://hianime.at/api/theme/episode/list/${1##*-}" | awk -v RS='ep-item' -v slug="$1" '
         { gsub(/\\/, "") }
-        $0 ~ ("/watch/" slug "[?]ep=") && match($0, /data-number="[^"]*"/) {
-            ep = substr($0, RSTART + 13, RLENGTH - 14);
-            match($0, /data-id="[0-9]+"/);
-            id = substr($0, RSTART + 9, RLENGTH - 10);
-            print id "\t" ep;
+        $0 ~ ("/watch/" slug "[?]ep=") && match($0, /data-id="[0-9]+"/) {
+            printf "%s\t", substr($0, RSTART + 9, RLENGTH - 10);
+            match($0, /data-number="[^"]*"/);
+            print substr($0, RSTART + 13, RLENGTH - 14);
         }
     '
 }
