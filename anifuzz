@@ -64,13 +64,13 @@ hianime_m3u8() {
     [[ $_embed =~ ^https?://[^/]+/ ]]
     refr="${BASH_REMATCH[0]}"
     local key=(111 116 97 107 117 45 101 109 98 101 100 45 118 49) _json_raw="" i=0 _char
-    for _byte in $(b64_decode "$(hianime_curl "$_embed" | awk 
-    	'/window\.__P="/ {
-    		sub(/.*window\.__P="/, "");
-    		sub(/".*/, "");
-    		print;
-    		exit
-    	}
+    for _byte in $(b64_decode "$(hianime_curl "$_embed" | awk '
+        /window\.__P="/ {
+            sub(/.*window\.__P="/, "");
+            sub(/".*/, "");
+            print;
+            exit
+        }
     ')" | od -v -An -tu1); do
         _char=$((_byte ^ key[i++ % 14]))
         _json_raw+=\\0$((_char / 64))$(((_char / 8) % 8))$((_char % 8))
