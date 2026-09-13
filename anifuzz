@@ -82,14 +82,14 @@ hianime_m3u8() {
             exit;
         }
     ')")"
-    _m3u8_master="$(<<<"$_json" awk -v RS='"src":"' '
+    video_link="$(<<<"$_json" awk -v RS='"src":"' '
         /\.m3u8/ {
             sub(/".*/, "");
             print;
             exit;
         }
     ')"
-    [[ -z "$_m3u8_master" ]] && return 1
+    [[ -z "$video_link" ]] && return 1
     sub_link="$(<<<"$_json" awk -v RS='},{' '
         /"default":true/ && /"src":"[^"]*"/ {
             sub(/.*"src":"/, "");
@@ -98,7 +98,6 @@ hianime_m3u8() {
             exit;
         }
     ')"
-    video_link="$_m3u8_master"
 }
 
 update_history() {
