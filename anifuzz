@@ -53,7 +53,7 @@ hianime_episodes() {
 
 # extract the individual m3u8 links from response of embed urls
 hianime_m3u8() {
-    _embed="$(b64_decode "$(hianime_curl "https://hianime.at/api/theme/episode/servers?episodeId=$(awk -F'\t' -v ep="$1" '$2 == ep {print $1; exit}' <<<"$episode_maps")" | awk -v type="$2" -v RS='server-item' '
+    local _embed="$(b64_decode "$(hianime_curl "https://hianime.at/api/theme/episode/servers?episodeId=$(awk -F'\t' -v ep="$1" '$2 == ep {print $1; exit}' <<<"$episode_maps")" | awk -v type="$2" -v RS='server-item' '
         {
             gsub(/\\"/, "\"");
         }
@@ -63,8 +63,8 @@ hianime_m3u8() {
         }
     ')")"
     [[ -z "$_embed" ]] && return 1
-    IFS=/ read -r p1 p2 p3 _ <<< "$_embed"
-    refr="$p1//$p3/"
+    [[ $_embed =~ ^https?://[^/]+/ ]]
+    refr="${BASH_REMATCH[0]}"
     local key=(111 116 97 107 117 45 101 109 98 101 100 45 118 49) _json_raw="" i=0 _char
     for _byte in $(b64_decode "$(hianime_curl "$_embed" | awk '/window\.__P="/{
     	sub(/.*window\.__P="/, "");
