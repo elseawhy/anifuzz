@@ -98,17 +98,7 @@ hianime_m3u8() {
             exit;
         }
     ')"
-    links="$(hianime_curl "$_m3u8_master" -e "$refr" | awk -v pre="${_m3u8_master%/*}/" '
-        /#EXT-X-STREAM/ && !/I-FRAME/ {
-            sub(/.*x/, "");
-            sub(/,.*/, "");
-            res=$0;
-            getline url;
-            if (url !~ /^https?:\/\//) url = pre url;
-            print res "p >" url;
-        }
-    ' | LC_ALL=C sort -g -r -s)"
-    [[ -n "$links" ]]
+    video_link="$_m3u8_master"
 }
 
 update_history() {
@@ -136,8 +126,7 @@ play() {
     [[ $'\n'"$ep_list"$'\n' == *$'\n'"$ep_no"$'\n'* ]] || die "Invalid episode!"
     [[ "$log_episode" == 1 ]] && logger -t anifuzz "${anime_title} ${ep_no}" 2>/dev/null
     [[ -z "$video_link" ]] && {
-        hianime_m3u8 "$ep_no" "$mode"
-        IFS=">" read -r _ video_link <<< "$(LC_ALL=C sort -g -r -s <<< "$links")"
+        hianime_m3u8 "$ep_no" "$mode" || die "Failed to extract video link!"
         [[ -z "$video_link" ]] && die "No valid sources found for $mode!"
     }
     local player_args=()
