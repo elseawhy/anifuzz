@@ -79,8 +79,8 @@ hianime_m3u8() {
     eval "$(printf "%b" "$_json_raw" | awk '
         match($0, /"src":"[^"]*\.m3u8"/) { v = substr($0, RSTART + 7, RLENGTH - 8) }
         /"default":true/ { 
-        	tmp = $0; sub(/.*"default":true/, "", tmp);
-        	if (match(tmp, /"src":"[^"]*"/)) s = substr(tmp, RSTART + 7, RLENGTH - 8)
+        	sub(/.*"default":true/, "", $0);
+        	if (match($0, /"src":"[^"]*"/)) s = substr($0, RSTART + 7, RLENGTH - 8)
         }
         END { print "video_link=\"" v "\"\nsub_link=\"" s "\"" }
     ')"
