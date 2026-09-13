@@ -24,7 +24,7 @@ b64_decode() {
 
 # search the query and give results. format is (id \t name)
 hianime_search() {
-    _page="$(hianime_curl "https://hianime.at/search?keyword=$1")"
+    local _page="$(hianime_curl "https://hianime.at/search?keyword=$1")"
     [[ "${_page,,}" == *"<title>just a moment"* ]] && die "Blocked by cloudflare."
     <<<"$_page" awk -v RS='<a href="https://hianime.at/watch/' '
         /^[^"]+"/ && match($0, /title="[^"]+"/) {
@@ -54,9 +54,7 @@ hianime_episodes() {
 # extract the individual m3u8 links from response of embed urls
 hianime_m3u8() {
     local _embed="$(b64_decode "$(hianime_curl "https://hianime.at/api/theme/episode/servers?episodeId=$(awk -F'\t' -v ep="$1" '$2 == ep {print $1; exit}' <<<"$episode_maps")" | awk -v type="$2" -v RS='server-item' '
-        {
-            gsub(/\\"/, "\"");
-        }
+        { gsub(/\\"/, "\""); }
         index($0, "data-type=\"" type "\"") > 0 && /data-server-name="ZokoAnime"/ && match($0, /data-hash="[^"]*"/) {
             print substr($0, RSTART + 11, RLENGTH - 12);
             exit;
@@ -66,12 +64,13 @@ hianime_m3u8() {
     [[ $_embed =~ ^https?://[^/]+/ ]]
     refr="${BASH_REMATCH[0]}"
     local key=(111 116 97 107 117 45 101 109 98 101 100 45 118 49) _json_raw="" i=0 _char
-    for _byte in $(b64_decode "$(hianime_curl "$_embed" | awk '/window\.__P="/{
-    	sub(/.*window\.__P="/, "");
-    	sub(/".*/, "");
-    	print;
-    	exit
-    }
+    for _byte in $(b64_decode "$(hianime_curl "$_embed" | awk 
+    	'/window\.__P="/ {
+    		sub(/.*window\.__P="/, "");
+    		sub(/".*/, "");
+    		print;
+    		exit
+    	}
     ')" | od -v -An -tu1); do
         _char=$((_byte ^ key[i++ % 14]))
         _json_raw+=\\0$((_char / 64))$(((_char / 8) % 8))$((_char % 8))
