@@ -22,15 +22,6 @@ b64_decode() {
     base64 -d <<< "$1" 2>/dev/null || base64 -D <<< "$1" 2>/dev/null || openssl base64 -d -A <<< "$1" 2>/dev/null
 }
 
-deobfuscate_blob() (
-    local key=(111 116 97 107 117 45 101 109 98 101 100 45 118 49) _output="" i=0 _char
-    for _byte in $(b64_decode "$1" | od -v -An -tu1); do
-        _char=$((_byte ^ key[i++ % 14]))
-        _output+=\\0$((_char / 64))$(((_char / 8) % 8))$((_char % 8))
-    done
-    printf "%b" "$_output"
-)
-
 # search the query and give results. format is (id \t name)
 hianime_search() {
     _page="$(hianime_curl "https://hianime.at/search?keyword=$1")"
@@ -74,14 +65,20 @@ hianime_m3u8() {
     [[ -z "$_embed" ]] && return 1
     IFS=/ read -r p1 p2 p3 _ <<< "$_embed"
     refr="$p1//$p3/"
-    _json="$(deobfuscate_blob "$(hianime_curl "$_embed" | awk '
+    _obfuscated="$(hianime_curl "$_embed" | awk '
         /window\.__P="/ {
             sub(/.*window\.__P="/, "");
             sub(/".*/, "");
             print;
             exit;
         }
-    ')")"
+    ')"
+    local key=(111 116 97 107 117 45 101 109 98 101 100 45 118 49) _json_raw="" i=0 _char
+    for _byte in $(b64_decode "$_obfuscated" | od -v -An -tu1); do
+        _char=$((_byte ^ key[i++ % 14]))
+        _json_raw+=\\0$((_char / 64))$(((_char / 8) % 8))$((_char % 8))
+    done
+    _json="$(printf "%b" "$_json_raw")"
     video_link="$(<<<"$_json" awk -v RS='"src":"' '
         /\.m3u8/ {
             sub(/".*/, "");
